@@ -23,6 +23,15 @@ secret_get() {  # <path> <KEY>
     -H "Authorization: Bearer $INF_TOKEN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["secret"]["secretValue"])'
 }
 
+secret_get_optional() {  # <path> <KEY>; prints the value, or nothing when the secret is absent
+  # For values a feature may not have yet (fail closed in the app, not in the deploy).
+  curl -sS "$INFISICAL_API/api/v3/secrets/raw/$2?workspaceId=$INFISICAL_PROJECT_ID&environment=prod&secretPath=$1" \
+    -H "Authorization: Bearer $INF_TOKEN" |
+    python3 -c 'import sys,json
+try: print(json.load(sys.stdin)["secret"]["secretValue"])
+except (ValueError, KeyError, TypeError): print("")'
+}
+
 secret_put() {  # <path> <KEY>, value on stdin; creates the folder path if needed
   # The program goes in -c, not a heredoc, so stdin stays the secret value.
   python3 -c "$_SECRET_PUT_PY" "$1" "$2"

@@ -14,8 +14,11 @@ scope when one lands.
 A controller token for the agent request route (#596) takes `--scope
 agents:request` plus one `--role` per allowed role, e.g. `--agent claude-code
 --scope agents:request --role financial_operations --role reliability_engineer`.
-Minting a controller token is an owner-approved step; this script never runs on
-its own.
+The two standing controller tokens (CLAUDE_CODE_TOKEN, CHATGPT_TOKEN) are minted,
+stored in the vault (/lifeos/agents) and renewed by the hyper-agents op
+`lifeos.controller_tokens.renew` in the token format pinned by
+tests/api/test_controller_token_contract.py; this script stays for one-off
+local tokens and never runs on its own.
 """
 
 import argparse

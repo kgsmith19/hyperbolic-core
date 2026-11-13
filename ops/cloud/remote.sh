@@ -66,6 +66,9 @@ open(path, \"w\").write(\"\\n\".join(lines + [\"PLATFORM_CF_ACCESS_AUD=\" + aud]
     echo "LIFEOS_OWNER_USER_ID=$(val PLATFORM_OWNER_ID)"
     echo "ANTHROPIC_API_KEY=$(secret_get /platform/lifeos-deploy ANTHROPIC_API_KEY)"
     echo "LIFEOS_BRIEFING_TZ=$(secret_get /platform/lifeos-deploy LIFEOS_BRIEFING_TZ)"
+    # Verifies controller tokens (#596). hyper-agents' lifeos.controller_tokens.renew op keeps
+    # the key pair and tokens in the vault; absent means agent tokens are refused (fail closed).
+    echo "LIFEOS_AGENT_JWT_PUBLIC_KEY=$(secret_get_optional /platform/lifeos-deploy LIFEOS_AGENT_JWT_PUBLIC_KEY)"
   } | put_file "$BASE/env/lifeos.env"
   {
     echo "PLATFORM_URL=http://platform.localhost:8400"
