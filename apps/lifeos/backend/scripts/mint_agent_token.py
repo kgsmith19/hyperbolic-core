@@ -17,8 +17,9 @@ agents:request` plus one `--role` per allowed role, e.g. `--agent claude-code
 The two standing controller tokens (CLAUDE_CODE_TOKEN, CHATGPT_TOKEN) are minted
 and renewed by the hyper-agents op `lifeos.controller_tokens.renew`, in the token
 format pinned by tests/api/test_controller_token_contract.py. The vault layout:
-tokens and the private key at /lifeos/agents, the public key at
-/platform/lifeos-deploy (read by ops/cloud/remote.sh into lifeos.env). The op
+tokens at /lifeos/agents, the private signing key at /platform/lifeos-signing
+(broker only), the public key at /platform/lifeos-deploy (read by
+ops/cloud/remote.sh into lifeos.env). The op
 creates a key pair only when neither half exists and never rotates one, so the
 deployed public key stays valid. This script stays for one-off local tokens and
 never runs on its own.
