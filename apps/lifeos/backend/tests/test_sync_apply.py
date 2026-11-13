@@ -73,8 +73,9 @@ def test_apply_writes_state_marks_the_receipt_and_a_second_run_is_all_skip() -> 
         assert last_applied(conn, SOURCE, "run-known") == T1
         assert last_applied(conn, SOURCE, "run-new") == T0
         assert _applied_flag(conn, receipt) is not None
-        # Re-planning the same source records changes nothing: zero duplicates.
-        crosswalk = _crosswalk("run-known", "run-same", "run-new")
+        # Re-planning the same source records changes nothing, even before the kernel has
+        # linked "run-new" in the crosswalk: zero duplicates.
+        crosswalk = _crosswalk("run-known", "run-same")
         second = plan_sync(records, crosswalk, applied_map(conn))
         assert {change.action for change in second} == {PlanAction.SKIP}
 
@@ -113,6 +114,17 @@ def test_refuses_unknown_and_rolled_back_receipts_and_leaves_skips_alone() -> No
         receipt = _batch(conn, [_record("rb2", T0)])
         apply(conn, receipt, dry_run=False)
         rollback(conn, receipt, dry_run=False)
-        conn.execute("update sync_receipt set applied_at = null where id = %s", (receipt,))
-        with pytest.raises(ApplyRefused, match="rolled back"):
+        with pytest.raises(ApplyRefused, match="rolled back"):  # the real path, no setup
             apply(conn, receipt, dry_run=False)
+
+
+def test_a_stale_create_is_refused_up_front_and_writes_nothing() -> None:
+    with db.connect() as conn:
+        record_applied(conn, SOURCE, "late", T2)
+        records = [_record("first", T0), _record("late", T1)]
+        plan = plan_sync(records, _crosswalk(), {})  # planned before "late" was applied
+        receipt = write_receipt(conn, records, plan).id
+        before = applied_map(conn)
+        with pytest.raises(ApplyRefused, match="older than its applied state"):
+            apply(conn, receipt, dry_run=False)
+        assert applied_map(conn) == before and _applied_flag(conn, receipt) is None

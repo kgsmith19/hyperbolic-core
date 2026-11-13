@@ -43,13 +43,13 @@ def plan_apply(conn: db.Connection, receipt_id: int) -> list[ApplyStep]:
     ).fetchone()
     if receipt is None:
         raise ApplyRefused(f"unknown receipt {receipt_id}")
-    if receipt["applied_at"] is not None:
-        raise ApplyRefused(f"receipt {receipt_id} was already applied")
     rolled_back = conn.execute(
         "select 1 as found from sync_receipt_rollback where receipt_id = %s", (receipt_id,)
     ).fetchone()
-    if rolled_back is not None:
+    if rolled_back is not None:  # checked first: rollback keeps applied_at set
         raise ApplyRefused(f"receipt {receipt_id} was rolled back; plan a new batch")
+    if receipt["applied_at"] is not None:
+        raise ApplyRefused(f"receipt {receipt_id} was already applied")
 
     items = conn.execute(
         "select source, external_id, action, source_updated_at, previous_applied_at "
@@ -57,14 +57,24 @@ def plan_apply(conn: db.Connection, receipt_id: int) -> list[ApplyStep]:
         (receipt_id,),
     ).fetchall()
     steps: list[ApplyStep] = []
+    seen: set[tuple[str, str]] = set()
     for item in items:
         if item["action"] not in _TOUCHED:
             continue
+        key = (item["source"], item["external_id"])
+        if key in seen:
+            raise ApplyRefused(f"receipt {receipt_id} touches {key[0]}/{key[1]} twice")
+        seen.add(key)
         current = last_applied(conn, item["source"], item["external_id"])
         if current != item["previous_applied_at"]:
             raise ApplyRefused(
                 f"applied state of {item['source']}/{item['external_id']} "
                 f"moved since batch {receipt_id} was planned"
+            )
+        if current is not None and item["source_updated_at"] < current:
+            # The stale-write guard would refuse mid-batch; refuse up front instead.
+            raise ApplyRefused(
+                f"{item['source']}/{item['external_id']} is older than its applied state"
             )
         steps.append(
             ApplyStep(
@@ -82,9 +92,13 @@ def apply(conn: db.Connection, receipt_id: int, *, dry_run: bool = True) -> list
     steps = plan_apply(conn, receipt_id)
     if dry_run:
         return steps
+    # Claim the receipt first, atomically: a concurrent apply finds no row to claim.
+    claimed = conn.execute(
+        "update sync_receipt set applied_at = %s where id = %s and applied_at is null",
+        (conn.tx_now(), receipt_id),
+    )
+    if claimed.rowcount != 1:
+        raise ApplyRefused(f"receipt {receipt_id} was already applied")
     for step in steps:
         record_applied(conn, step.source, step.external_id, step.applied_at)
-    conn.execute(
-        "update sync_receipt set applied_at = %s where id = %s", (conn.tx_now(), receipt_id)
-    )
     return steps

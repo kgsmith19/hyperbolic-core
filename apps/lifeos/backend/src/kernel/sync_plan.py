@@ -77,9 +77,15 @@ def _classify(
             PlanAction.CONFLICT, *key, None, "duplicate source identifier in batch"
         )
     canonical = crosswalk.resolve(*key)
-    if canonical is None:
-        return PlannedChange(PlanAction.CREATE, *key, None, "new source identifier")
     seen = last_applied.get(key)
+    if canonical is None:
+        # Applied state is the record of what was written, even before the kernel links
+        # the identity in the crosswalk: never create the same source record twice.
+        if seen is not None and record.updated_at < seen:
+            return PlannedChange(PlanAction.STALE, *key, None, "source older than last applied")
+        if seen is not None and record.updated_at == seen:
+            return PlannedChange(PlanAction.SKIP, *key, None, "already applied at this timestamp")
+        return PlannedChange(PlanAction.CREATE, *key, None, "new source identifier")
     if seen is None:
         return PlannedChange(PlanAction.UPDATE, *key, canonical, "known identity, never applied")
     if record.updated_at < seen:
