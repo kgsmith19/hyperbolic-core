@@ -15,14 +15,12 @@ nothing is paid, scheduled or disputed here.
 """
 
 import csv
-import io
 import sys
 from pathlib import Path
 
 from domains.money.common import money_context
 from domains.money.ledger_shape import LedgerHeaderError, ShapeResult, shape_ledger
 from domains.ops.receipts import STATUS_FAILED, STATUS_OK, JobResult, run_job
-from kernel.access import AccessContext
 
 METHOD = "domains.money.ledger_job"
 
@@ -33,25 +31,35 @@ def receipt_summary(result: ShapeResult) -> str:
 
 
 def refusal_summary(error: LedgerHeaderError) -> str:
-    if error.problem == "empty" or not error.column:
+    if error.problem == "empty":
         return "header refused: the ledger table is empty"
     return f"header refused: column {error.column!r} {error.problem}"
 
 
-def _job(ctx: AccessContext, path: Path) -> JobResult:
+def read_table(path: Path) -> list[list[str]]:
+    """The CSV rows with leading blank rows dropped (the header is the first non-blank row).
+    ``newline=""`` keeps newlines inside quoted cells, as the csv module requires."""
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+    while rows and not any(cell.strip() for cell in rows[0]):
+        rows.pop(0)
+    return rows
+
+
+def _job(path: Path) -> JobResult:
     try:
-        text = path.read_text(encoding="utf-8-sig")
-    except (OSError, UnicodeDecodeError) as exc:
+        table = read_table(path)
+    except (OSError, UnicodeDecodeError, csv.Error) as exc:
+        # Class name only: an OS message can echo the local path.
         return JobResult(status=STATUS_FAILED, summary=f"could not read file: {type(exc).__name__}")
-    table = [row for row in csv.reader(io.StringIO(text))]
     try:
         result = shape_ledger(table)
     except LedgerHeaderError as exc:
-        summary = refusal_summary(exc)
-        print(f"ledger_job: FAILED - {summary}", file=sys.stderr)
-        return JobResult(status=STATUS_FAILED, summary=summary)
+        return JobResult(status=STATUS_FAILED, summary=refusal_summary(exc))
     summary = receipt_summary(result)
-    print(summary)
+    if result.rejected and not result.rows:
+        # Nothing readable is not a quiet success (e.g. a locale date format on export).
+        return JobResult(status=STATUS_FAILED, summary=f"no row could be shaped; {summary}")
     return JobResult(status=STATUS_OK, summary=summary)
 
 
@@ -61,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: python -m domains.money.ledger_job <ledger.csv>", file=sys.stderr)
         return 2
     path = Path(args[0])
-    return run_job(money_context(), METHOD, lambda ctx: _job(ctx, path))
+    return run_job(money_context(), METHOD, lambda _ctx: _job(path))
 
 
 if __name__ == "__main__":

@@ -61,8 +61,8 @@ def test_a_refused_header_records_a_failed_receipt_naming_only_the_column(
     assert main([str(path)]) == 1
     receipt = last_receipt(money_ctx)
     assert receipt["status"] == "failed"
+    # Exact equality: the summary is the column and the problem, never header text.
     assert receipt["summary"] == f"header refused: {expected}"
-    assert "Amount Due" not in str(receipt["summary"])  # never the raw header text
 
 
 def test_an_empty_or_missing_file_fails_with_a_receipt(
@@ -75,3 +75,26 @@ def test_an_empty_or_missing_file_fails_with_a_receipt(
     assert main([str(tmp_path / "nope.csv")]) == 1
     assert last_receipt(money_ctx)["summary"] == "could not read file: FileNotFoundError"
     assert main([]) == 2
+
+
+def test_a_ledger_with_no_readable_row_fails_instead_of_passing_quietly(
+    tmp_path: Path, money_ctx: AccessContext
+) -> None:
+    path = tmp_path / "locale.csv"
+    path.write_text(HEADER + "elec-11,11/20/2026,96.67,AutoPay,scheduled,\n")
+    assert main([str(path)]) == 1
+    receipt = last_receipt(money_ctx)
+    assert receipt["status"] == "failed"
+    assert str(receipt["summary"]).startswith("no row could be shaped;")
+
+
+def test_leading_blank_lines_are_skipped_and_blank_only_is_empty(
+    tmp_path: Path, money_ctx: AccessContext
+) -> None:
+    path = tmp_path / "padded.csv"
+    path.write_text("\n  \n" + HEADER + ROWS)
+    assert main([str(path)]) == 0
+    blank = tmp_path / "blank.csv"
+    blank.write_text("\n \n")
+    assert main([str(blank)]) == 1
+    assert last_receipt(money_ctx)["summary"] == "header refused: the ledger table is empty"

@@ -29,6 +29,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from typing import Literal
 
 from domains.bills.forecast import BillLedgerRow, PaymentStatus
 
@@ -53,7 +54,9 @@ class LedgerHeaderError(ValueError):
     ``problem`` is ``missing``, ``duplicated`` or ``empty``: enough for a receipt, with
     no header or ledger text."""
 
-    def __init__(self, message: str, column: str = "", problem: str = "empty") -> None:
+    def __init__(
+        self, message: str, column: str, problem: Literal["missing", "duplicated", "empty"]
+    ) -> None:
         super().__init__(message)
         self.column = column
         self.problem = problem
@@ -143,7 +146,7 @@ def _cell(cells: Sequence[str], index: dict[str, int], column: str) -> str:
 def shape_ledger(table: Sequence[Sequence[str]]) -> ShapeResult:
     """Shape a ledger table (header first). Refuses a bad header; rejects bad rows."""
     if not table:
-        raise LedgerHeaderError("ledger table is empty")
+        raise LedgerHeaderError("ledger table is empty", "", "empty")
     index = _header_index(table[0])
     header_map = tuple((column, _normalize(table[0][index[column]])) for column in REQUIRED_COLUMNS)
 
