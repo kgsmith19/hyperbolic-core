@@ -23,6 +23,23 @@ secret_get() {  # <path> <KEY>
     -H "Authorization: Bearer $INF_TOKEN" | python3 -c 'import sys,json;print(json.load(sys.stdin)["secret"]["secretValue"])'
 }
 
+secret_get_optional() {  # <path> <KEY>; the value, or nothing ONLY when the secret is absent (404)
+  # For values a feature may not have yet (the app fails closed). Any other failure (auth,
+  # 5xx, network) fails the call, so an outage can never blank a key that exists.
+  # Assign it to a variable on its own line so `set -e` applies (not inside echo/$()).
+  local body status
+  body="$(mktemp)"
+  status="$(curl -sS -o "$body" -w '%{http_code}' \
+    "$INFISICAL_API/api/v3/secrets/raw/$2?workspaceId=$INFISICAL_PROJECT_ID&environment=prod&secretPath=$1" \
+    -H "Authorization: Bearer $INF_TOKEN")" || { rm -f "$body"; return 1; }
+  case "$status" in
+    200) python3 -c 'import sys,json;print(json.load(open(sys.argv[1]))["secret"]["secretValue"])' "$body" ;;
+    404) ;;
+    *) echo "secret_get_optional $1/$2: HTTP $status" >&2; rm -f "$body"; return 1 ;;
+  esac
+  rm -f "$body"
+}
+
 secret_put() {  # <path> <KEY>, value on stdin; creates the folder path if needed
   # The program goes in -c, not a heredoc, so stdin stays the secret value.
   python3 -c "$_SECRET_PUT_PY" "$1" "$2"
