@@ -80,3 +80,13 @@ def test_unnormalized_identifier_fails_closed() -> None:
 def test_plan_preserves_input_order() -> None:
     plan = plan_sync([_record("b"), _record("a")], _crosswalk("a"), {("google-tasks", "a"): T0})
     assert [change.external_id for change in plan] == ["b", "a"]
+
+
+def test_an_applied_record_not_yet_in_the_crosswalk_is_never_created_twice() -> None:
+    record = SourceRecord(source="tasks", external_id="t-9", title="x", updated_at=T0)
+    applied = {("tasks", "t-9"): T0}
+    assert plan_sync([record], IdentityCrosswalk(), applied)[0].action == PlanAction.SKIP
+    older = SourceRecord(
+        source="tasks", external_id="t-9", title="x", updated_at=T0 - timedelta(hours=1)
+    )
+    assert plan_sync([older], IdentityCrosswalk(), applied)[0].action == PlanAction.STALE
