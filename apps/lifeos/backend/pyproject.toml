@@ -54,6 +54,13 @@ no_implicit_optional = true
 module = "recurring_ical_events.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# PyMuPDF 1.26.6 stopped advertising a py.typed marker.  Its boundary is
+# already validated in domains.documents; keep the third-party package typed
+# as Any instead of letting dependency metadata drift break every LifeOS PR.
+module = "pymupdf"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
