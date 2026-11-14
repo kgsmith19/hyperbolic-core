@@ -18,6 +18,7 @@ import binascii
 import re
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import jwt
 
@@ -118,6 +119,12 @@ def mint(
 
 
 def verify(token: str, public_key_pem: str) -> AccessContext:
+    return verify_claims(token, public_key_pem)[0]
+
+
+def verify_claims(token: str, public_key_pem: str) -> tuple[AccessContext, dict[str, Any]]:
+    """`verify`, also returning the verified claims (``sub``, ``roles``) for doors that
+    must say who asked: the remote MCP transport records ``requested_by`` from them."""
     try:
         claims = jwt.decode(
             token,
@@ -139,4 +146,4 @@ def verify(token: str, public_key_pem: str) -> AccessContext:
     ):
         raise AgentTokenError("malformed roles claim")
     request_roles(validated, roles)
-    return AccessContext(scopes=validated)
+    return AccessContext(scopes=validated), claims
