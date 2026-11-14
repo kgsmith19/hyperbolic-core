@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "operations": [
+    {
+      "id": "lifeos.drive.docs-sheets-drift.v1",
+      "risk": "R2",
+      "check": "domains.ops.drive_policy:prepare_registered",
+      "resolver": "domains.ops.drive_policy:apply_registered",
+      "rollback_handler": "domains.ops.drive_policy:rollback_registered",
+      "adapter": "domains.ops.drive_policy:ConnectorRepairAdapter",
+      "authorization": "matching plan digest, named approver, explicit archive grant",
+      "expected_state": "source file ID, Docs revision ID, parents, locator fingerprint",
+      "writes": "idempotent canonical-Sheet upsert followed by readback",
+      "source_mutation": "archive move only; delete is unsupported",
+      "rollback": "restore the prior Sheet record (or remove a newly inserted row) and restore original parents",
+      "verification": "Sheet readback, preserved file ID/revision, exact archive parent, clean rescan"
+    }
+  ]
+}

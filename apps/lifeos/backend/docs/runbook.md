@@ -510,3 +510,22 @@ Status rules:
 - `WATCH` (automation is handling it) and `LATER` are not listed.
 - An unknown status is listed with the `status_unknown` flag.
 - A deadline is shown only with its source; otherwise it is flagged `deadline_unsourced`.
+
+## Docs-as-guides / Sheets-as-records enforcement (#636)
+
+Run a bounded, explicit-manifest scan with `python -m scripts.scan_drive_policy <manifest.json>`.
+Use `- --stdin-base64-lines` when document text must not be persisted locally. The report contains
+only source IDs, rule names, target Sheet tabs, line numbers, and short fingerprints; it never
+copies source text.
+
+The R2 operation is registered in `ops-repair-operations.json`. Any local or cloud harness binds
+its authenticated Google tools to `ConnectorRepairAdapter`; credentials remain in the harness and
+never enter LifeOS. On a terminal that cannot suppress input echo, pipe the manifest through
+non-interactive stdin instead.
+
+The scanner ignores archived documents and non-Google-Doc files. A finding produces a
+deterministic expected-state plan with Sheet upserts and a reversible archive proposal. Applying
+that plan requires a caller-owned `RepairAdapter`, a matching plan digest, a named approver, and
+fresh source revision/parent state. Every Sheet write is read back. Archive moves are separately
+authorized, preserve the original file ID and revision, and are the only supported source-file
+mutation; the repair interface has no delete operation.
