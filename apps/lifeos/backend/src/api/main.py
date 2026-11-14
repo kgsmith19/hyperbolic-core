@@ -33,12 +33,14 @@ from api.dtos import (
     ApproveIn,
     CaptureIn,
     CompleteIn,
+    ConsentReceiptOut,
     DecideIn,
     DefineTypeIn,
     DoneIn,
     ForgetIn,
     ProgressIn,
     ProposeActionIn,
+    RegistryNeedsMeItem,
     RelateIn,
     RescheduleIn,
     SnoozeIn,
@@ -52,7 +54,7 @@ from domains.agents.proposals import (
 )
 from domains.agents.proposals import guard_capture as guard_agent_proposal_capture
 from domains.agents.receipts import guard_capture as guard_receipt_capture
-from domains.agents.requests import RequestRefused, parse_role
+from domains.agents.requests import RequestRefused, first_request_by, parse_role
 from domains.agents.requests import guard_capture as guard_request_capture
 from domains.agents.requests import request as request_gate_decision
 from domains.agents.roles import default_registry
@@ -97,6 +99,9 @@ from domains.intentions.today import (
     set_progress,
     today,
 )
+from domains.ops.common import optional_find
+from domains.ops.registry import TYPE_NAME as REGISTRY_TYPE
+from domains.ops.registry import needs_me as registry_needs_me
 from domains.ops.review import ReviewFeed, review_feed
 from kernel.access import AccessContext, ScopeError
 from kernel.env import read_env
@@ -717,6 +722,45 @@ def get_needs_me(context: Ctx) -> list[NeedsMeItem]:
     """#532 Needs Me: open items in order (soonest deadline, then priority), with
     snoozed items hidden until their date. Read-only; never invents a next action."""
     return needs_me(context)
+
+
+@app.get("/needs-me/registry")
+def get_needs_me_registry(context: Ctx) -> list[RegistryNeedsMeItem]:
+    """#630: open ManualBlockers and active Task Registry rows that need the operator, in order
+    (soonest sourced deadline, then blockers, then tasks). Read-only."""
+    items = []
+    for e in registry_needs_me(optional_find(context, REGISTRY_TYPE)):
+        a = e.attributes
+        items.append(
+            RegistryNeedsMeItem(
+                entity_id=e.id,
+                source_kind=str(a["kind"]),
+                source_key=str(a["record_key"]),
+                external_id=str(a["external_id"]),
+                title=str(a["title"]),
+                status_text=a.get("status_text"),
+                next_action=a.get("next_action"),
+                deadline=a.get("deadline"),
+                deadline_source=a.get("deadline_source"),
+                source_url=a.get("source_url"),
+                flags=list(a.get("flags") or []),
+            )
+        )
+    return items
+
+
+@app.get("/agents/consent/{requested_by}")
+def get_agent_consent(requested_by: str, context: Ctx) -> ConsentReceiptOut:
+    """#630 / MB-004: the first persisted request from a verified controller (for example
+    `agent:chatgpt`) is its consent receipt. 404 until one exists: configuration never counts."""
+    first = first_request_by(context, requested_by)
+    if first is None:
+        raise HTTPException(status_code=404, detail=f"no request recorded from {requested_by}")
+    return ConsentReceiptOut(
+        requested_by=first.requested_by,
+        requested_at=first.requested_at,
+        receipt_key=first.receipt_key,
+    )
 
 
 @app.post("/intentions/{intention_id}/snooze")

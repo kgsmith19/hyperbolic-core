@@ -53,6 +53,8 @@ from domains.cpap.compliance import compliance_for_briefing, compliance_view
 from domains.episodes.lines import usual_present
 from domains.ops.common import optional_find
 from domains.ops.receipts import JobResult, run_job
+from domains.ops.registry import TYPE_NAME as REGISTRY_TYPE
+from domains.ops.registry import needs_me as registry_needs_me
 from domains.ops.types import GATE_DAYS_PER_WEEK, GATE_WEEKS
 from kernel import services
 from kernel.access import AccessContext
@@ -161,6 +163,12 @@ def assemble(ctx: AccessContext, day: date, zone: tzinfo) -> dict[str, Any]:
     if compliance is not None:
         attributes["cpap_compliance"] = compliance_view(compliance)
         cited += compliance.cited_entity_ids
+    # #630: one Needs Me section citing open Operations Registry records (ManualBlockers and
+    # Task Registry rows) by entity id only; absent when there are none, like episodes.
+    registry = registry_needs_me(optional_find(ctx, REGISTRY_TYPE))
+    if registry:
+        attributes["needs_me_registry_ids"] = [str(e.id) for e in registry]
+        cited += [e.id for e in registry]
     if day.isoweekday() == 1:  # Monday: the weekly edition
         gate, counted = _gate_status(ctx, day)
         attributes["gate"] = gate

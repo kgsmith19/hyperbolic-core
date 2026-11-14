@@ -121,3 +121,33 @@ def requester_of(ctx: AccessContext, receipt_key: str) -> str | None:
     require(ctx, SCOPE_READ)
     found = services.find(ctx, type_name=TYPE_REQUEST, filters={"receipt_key": receipt_key})
     return str(found[0].attributes["requested_by"]) if found else None
+
+
+@dataclass(frozen=True, slots=True)
+class FirstRequest:
+    """The first persisted request from one verified controller: the consent receipt (MB-004).
+
+    Only a stored `agent_request` counts. A configured token, a connector setting or a
+    minted-but-unused credential never does."""
+
+    requested_by: str
+    requested_at: str
+    receipt_key: str
+
+
+def first_request_by(ctx: AccessContext, requested_by: str) -> FirstRequest | None:
+    """The earliest request recorded for `requested_by` (e.g. ``agent:chatgpt``), or None."""
+    require(ctx, SCOPE_READ)
+    try:
+        found = services.find(ctx, type_name=TYPE_REQUEST, filters={"requested_by": requested_by})
+    except LookupError:
+        return None  # no request has ever been recorded on this box
+    if not found:
+        return None
+    first = min(found, key=lambda e: str(e.attributes["requested_at"]))
+    a = first.attributes
+    return FirstRequest(
+        requested_by=str(a["requested_by"]),
+        requested_at=str(a["requested_at"]),
+        receipt_key=str(a["receipt_key"]),
+    )

@@ -484,3 +484,29 @@ platform (owner email/password) and prints a bearer token; pass it as `Authoriza
 VPS ~$6/mo. Tailscale, GitHub (private repo, Actions, GHCR), Supabase free
 tier, backups: $0. Flip to Supabase Pro ($25/mo — managed daily backups, no
 pausing, network restrictions) when the data becomes load-bearing.
+
+## Operations Registry in Needs Me and the briefing (#630)
+
+LifeOS mirrors the Operations Registry's **Manual Blockers** and **Task Registry** tabs as
+read-only `registry_record` entities. The sheet stays the task master, and nothing is written
+back to it.
+
+1. Once per environment, before the first briefing that cites registry records, sync the
+   briefing schema (it gains the optional `needs_me_registry_ids`):
+   `python scripts/migrate_briefing_composition.py`.
+2. Export both tabs as raw cell values to JSON
+   (`{"manual_blockers": [...], "task_registry": [...]}`), then run
+   `python scripts/import_registry.py snapshot.json`. It prints counts only. A tab with a missing
+   or doubled column, or a repeated row ID, is refused whole (exit 2). Re-running an unchanged
+   snapshot writes nothing.
+3. `GET /needs-me/registry` lists the open records that need the operator, and the next briefing
+   cites them by id.
+4. `GET /agents/consent/agent:chatgpt` returns that controller's first persisted request: the
+   MB-004 consent receipt. It returns 404 until one exists.
+
+Status rules:
+
+- `RESOLVED`, `DONE` and `CANCELLED` leave Needs Me.
+- `WATCH` (automation is handling it) and `LATER` are not listed.
+- An unknown status is listed with the `status_unknown` flag.
+- A deadline is shown only with its source; otherwise it is flagged `deadline_unsourced`.

@@ -152,6 +152,8 @@ BRIEFING_SCHEMA: dict[str, Any] = {
         "episodes_line": {"type": "string", "maxLength": 80},
         "gate": _GATE,
         "cpap_compliance": _CPAP_COMPLIANCE,
+        # #630: open Operations Registry records that need the operator (ids only).
+        "needs_me_registry_ids": _UUID_LIST,
         "provenance": _PROVENANCE,
     },
     "required": ["briefing_key", "date", "focus_intention_ids", "appointment_ids", "provenance"],
