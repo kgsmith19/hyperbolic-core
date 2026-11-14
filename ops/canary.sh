@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 project="${CANARY_PROJECT:-hyp-canary}"
 offset="${CANARY_PORT_OFFSET:-10000}"
-for var in PLATFORM_API_PORT:8400 NETWORK_CHECKER_PORT:8787 LIFEOS_PORT:8000 BROKER_PORT:8300 BRAIN_PORT:8100; do
+for var in PLATFORM_API_PORT:8400 NETWORK_CHECKER_PORT:8787 LIFEOS_PORT:8000 LIFEOS_MCP_PORT:8090 BROKER_PORT:8300 BRAIN_PORT:8100; do
   name="${var%%:*}"; base="${var##*:}"
   export "HOST_${name}=$((base + offset))"
 done
