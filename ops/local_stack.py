@@ -27,6 +27,10 @@ COMPONENTS = (
         "apps/network-checker", "network-checker", "compose", "http://127.0.0.1:8787", "make up"
     ),
     LocalComponent("apps/lifeos", "lifeos", "compose", "http://127.0.0.1:8000/healthz", "make up"),
+    # The remote MCP door (#633): same image as lifeos, its own service and port.
+    LocalComponent(
+        "apps/lifeos/backend/src/mcp_server", "lifeos-mcp", "compose", "http://127.0.0.1:8090/mcp", "make up"
+    ),
     LocalComponent(
         "services/llm-handler",
         "llm-handler",

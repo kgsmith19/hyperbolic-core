@@ -15,4 +15,9 @@ check '<div id="root">' /life/
 check '"ok":true' /platform/health
 check '"status":"ok"' /life/api/healthz
 check 'ok' /api/brain/health
-echo "smoke: ok (services healthy; shell, life, platform, lifeos, brain routes answer)"
+# The MCP door refuses an unauthenticated call itself (401 + RFC 9728 pointer), even behind Access.
+mcp="$(curl -sS -m 10 -o /dev/null -w '%{http_code}' -X POST -H 'Host: core.kylegsmith.com' \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$e/life/mcp")"
+[[ "$mcp" == 401 ]] || { echo "smoke: /life/mcp answered $mcp, want 401" >&2; exit 1; }
+echo "smoke: ok (services healthy; shell, life, platform, lifeos, brain, lifeos-mcp routes answer)"

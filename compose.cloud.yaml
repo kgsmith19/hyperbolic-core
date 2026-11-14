@@ -35,6 +35,22 @@ services:
       # Same-origin mount behind edge: https://core.kylegsmith.com/life/api
       LIFEOS_ROOT_PATH: /life/api
 
+  lifeos-mcp:
+    ports: !reset []
+    logging: *logging
+    labels: { hyperbolic-core.app: lifeos-mcp }
+    environment:
+      # Published at https://core.kylegsmith.com/life/mcp behind the "LifeOS MCP" Access app
+      # (infra/cloudflare, Managed OAuth). None of these values is a secret: the AUD is the
+      # app's public tag (tofu output mcp_access_aud).
+      LIFEOS_MCP_RESOURCE_URL: https://core.kylegsmith.com/life/mcp
+      LIFEOS_MCP_AUTH_ISSUER: https://spring-smoke-421e.cloudflareaccess.com
+      LIFEOS_MCP_EDGE: cloudflare-access
+      LIFEOS_MCP_EDGE_TEAM_DOMAIN: spring-smoke-421e.cloudflareaccess.com
+      LIFEOS_MCP_EDGE_AUD: 7f42f506d99450ef72216654fdb7c9955834f285ac969dd8dc6345e2c3d73d33
+      LIFEOS_MCP_EDGE_SCOPES: agents:request
+      LIFEOS_MCP_EDGE_ROLES: communications,household_operations
+
   broker:
     ports: !reset []
     logging: *logging
@@ -61,6 +77,7 @@ services:
     depends_on:
       platform-api: { condition: service_healthy }
       lifeos: { condition: service_healthy }
+      lifeos-mcp: { condition: service_healthy }
       brain: { condition: service_healthy }
     restart: unless-stopped
     logging: *logging

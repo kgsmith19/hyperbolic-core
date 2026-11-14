@@ -98,6 +98,38 @@ services:
       retries: 5
       start_period: 10s
 
+  # Remote MCP agent door (apps/lifeos/docs/agent-ingress.md, #631/#633): the same image and
+  # database as lifeos, serving `python -m mcp_server --http`. Locally it accepts LifeOS agent
+  # tokens only; compose.cloud.yaml adds the Cloudflare Access edge.
+  lifeos-mcp:
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    build:
+      context: apps/lifeos/backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "mcp_server", "--http", "--host", "0.0.0.0", "--port", "8090"]
+    environment:
+      LIFEOS_DB_PATH: /app/var/lifeos/lifeos.db
+      LIFEOS_BLOB_ROOT: /app/var/lifeos/blobs
+      LIFEOS_MCP_RESOURCE_URL: http://127.0.0.1:8090/mcp
+      LIFEOS_MCP_AUTH_ISSUER: http://127.0.0.1:8090
+    env_file:
+      - path: apps/lifeos/backend/.env
+        required: false
+        format: raw
+    ports:
+      - "127.0.0.1:${HOST_LIFEOS_MCP_PORT:-8090}:8090"
+    volumes:
+      - ${HYP_VAR:-./var}/lifeos:/app/var/lifeos
+    depends_on:
+      lifeos: { condition: service_healthy }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',8090),3).close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
   broker:
     build:
       context: .

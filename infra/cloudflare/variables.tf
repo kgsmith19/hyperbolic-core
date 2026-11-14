@@ -39,3 +39,13 @@ variable "state_passphrase" {
   type      = string
   sensitive = true
 }
+
+variable "mcp_oauth_redirect_uris" {
+  description = "OAuth redirect URIs allowed for dynamically registered MCP clients (one per harness)."
+  type        = list(string)
+  default = [
+    "https://chatgpt.com/connector_platform_oauth_redirect",
+    "https://claude.ai/api/mcp/auth_callback",
+    "https://claude.com/api/mcp/auth_callback",
+  ]
+}
