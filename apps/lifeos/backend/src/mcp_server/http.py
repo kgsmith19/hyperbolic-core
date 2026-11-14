@@ -33,7 +33,6 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import AnyHttpUrl
 
 from domains.agents.requests import parse_role
 from domains.agents.requests import request as request_gate_decision
@@ -163,11 +162,15 @@ def build_server(settings: HttpSettings, public_key: Callable[[], str | None]) -
         name="lifeos",
         instructions=tools.INSTRUCTIONS,
         token_verifier=AgentTokenVerifier(public_key),
-        auth=AuthSettings(
-            issuer_url=AnyHttpUrl(settings.issuer_url),
-            resource_server_url=AnyHttpUrl(settings.resource_url),
-            # Each verifier checks its own audience: agent tokens aud=lifeos-mcp, the edge its AUD.
-            validate_token_resource=False,
+        # Parsed by AuthSettings itself, which preserves a path-less URL exactly: RFC 8414/9207
+        # compare issuers as strings, so a trailing slash added here would break discovery.
+        auth=AuthSettings.model_validate(
+            {
+                "issuer_url": settings.issuer_url,
+                "resource_server_url": settings.resource_url,
+                # Each verifier checks its own audience: agent tokens aud=lifeos-mcp, edge its AUD.
+                "validate_token_resource": False,
+            }
         ),
     )
     for tool in (list_types, find, get_entity, history):
