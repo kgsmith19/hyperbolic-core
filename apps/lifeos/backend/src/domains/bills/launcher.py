@@ -25,7 +25,13 @@ from typing import Literal
 
 from domains.agents.receipts import Receipt, record
 from domains.agents.roles import Role, RoleRegistry
-from domains.bills.forecast import FLAG_AUTOPAY_FAILED, FLAG_UNKNOWN_AMOUNT, ForecastRow
+from domains.bills.forecast import (
+    FLAG_AUTOPAY_FAILED,
+    FLAG_DUPLICATE,
+    FLAG_UNKNOWN_AMOUNT,
+    ForecastRow,
+)
+from domains.bills.portals import PaymentPortal, known_provider, reviewed_portal
 from kernel.access import AccessContext
 from kernel.events import DEFAULT_ACTOR
 
@@ -108,3 +114,57 @@ def launch(
         receipt = record(ctx, registry, ROLE, PERMISSION, key, actor=actor)
         results.append(LaunchResult(plan=plan, receipt=receipt))
     return results
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentHandoff:
+    """A human-review instruction, never payment authorization or settlement proof.
+
+    Auth is deliberately not checked: this pure launcher has no provider session.
+    No amount, account detail or derived financial value is copied into this object.
+    It is transient, not a new kernel entity or public MCP response contract.
+    """
+
+    status: Literal["review_required", "unsupported", "blocked"]
+    reason: str
+    plan: LaunchPlan | None = None
+    portal: PaymentPortal | None = None
+    authentication_status: Literal["not_checked"] = "not_checked"
+    payee_match: Literal["not_verified"] = "not_verified"
+    executed: Literal[False] = False
+
+
+def prepare_payment_handoff(
+    row: ForecastRow, provider: str, as_of: date
+) -> PaymentHandoff:
+    """Prepare the existing launcher's human step with a reviewed public route.
+
+    No I/O, approval, execution receipt, state mutation or credential access.
+    The provider is caller-selected, not matched to bill identity. The owner must
+    verify the payee, exact bill, fees and current status in the portal.
+    Callers must preserve bills' sensitive-domain access boundaries; this function
+    does not expose them through generic agent tools or widen an AccessContext.
+    """
+    if not known_provider(provider):
+        return PaymentHandoff("unsupported", "unsupported_provider")
+    portal = reviewed_portal(provider, as_of)
+    if portal is None:
+        return PaymentHandoff("blocked", "portal_verification_required")
+    bill = row.row
+    if (
+        bill.excluded
+        or row.bucket in ("paid", "out_of_window")
+        or FLAG_DUPLICATE in row.flags
+        or bill.payment_status not in ("unpaid", "autopay_failed")
+    ):
+        return PaymentHandoff("blocked", "ineligible_bill")
+    if bill.amount is None or not bill.amount.is_finite() or bill.amount <= 0:
+        return PaymentHandoff("blocked", "confirm_amount")
+    if row.bucket != "obligation":
+        return PaymentHandoff("blocked", "ineligible_bill")
+    if not bill.balance_fresh:
+        return PaymentHandoff("blocked", "refresh_balance")
+    plan = plan_for(row, as_of)
+    if plan is None:
+        return PaymentHandoff("blocked", "no_action_needed")
+    return PaymentHandoff("review_required", "verify_payee_bill_and_fees_in_portal", plan, portal)
