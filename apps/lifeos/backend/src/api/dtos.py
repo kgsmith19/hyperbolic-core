@@ -114,3 +114,26 @@ class AgentRequestIn(BaseModel):
     role: str
     permission: str
     idempotency_key: str
+
+
+class RegistryNeedsMeItem(BaseModel):
+    """One open Operations Registry record that needs the operator (#630). Copied from the sheet
+    as captured; nothing is invented, and `flags` says what is missing or unverified."""
+
+    entity_id: UUID
+    source_kind: str
+    source_key: str
+    external_id: str
+    title: str
+    status_text: str | None
+    next_action: str | None
+    deadline: str | None
+    deadline_source: str | None
+    source_url: str | None
+    flags: list[str]
+
+
+class ConsentReceiptOut(BaseModel):
+    requested_by: str
+    requested_at: str
+    receipt_key: str

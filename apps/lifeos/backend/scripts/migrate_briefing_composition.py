@@ -11,8 +11,8 @@ is false and `open_review_ids` was required).
 
 It syncs the stored schema to the current ``BRIEFING_SCHEMA``, so later
 composition amendments reuse it: EP1 adds the optional ``episodes_line``,
-H2 adds the optional ``cpap_compliance`` — re-run once per environment after
-each lands.
+H2 adds the optional ``cpap_compliance``, #630 the optional
+``needs_me_registry_ids`` — re-run once per environment after each lands.
 
 Idempotent operator script, run once per environment BEFORE the first
 recomposed briefing run, against whatever DATABASE_URL kernel.env resolves:
