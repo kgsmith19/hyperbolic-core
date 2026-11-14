@@ -15,6 +15,7 @@ pinned in `.terraform.lock.hcl`). `infra/cloudflare/cf.sh` is the only supported
 | DNS | `core` and `ssh-core` CNAME → `<tunnel>.cfargotunnel.com`, proxied | created; no other record is touched |
 | Access application | `Hyperbolic Core Ops` → `ssh-core.kylegsmith.com`, 1 h | created |
 | Access policy + service token | `Hyperbolic Core Ops Service Token` / `hyperbolic-core-ops` | created |
+| Access application | `LifeOS MCP` → `core.kylegsmith.com/life/mcp` (path-scoped), Owner Only, **Managed OAuth** (DCR limited to `mcp_oauth_redirect_uris`; 15 m tokens, 30 d grant) | created (#633); its AUD is also in the core tunnel ingress `aud_tag` |
 
 `kylegsmith.com` and `www.kylegsmith.com` are reserved for the future public site. `cf.sh verify`
 fails if either one ever points at the tunnel.

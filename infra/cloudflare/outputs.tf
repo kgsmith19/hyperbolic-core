@@ -23,3 +23,8 @@ output "tunnel_token" {
   value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.prod.token
   sensitive = true
 }
+
+output "mcp_access_aud" {
+  description = "AUD tag of the LifeOS MCP Access application (LIFEOS_MCP_EDGE_AUD)."
+  value       = cloudflare_zero_trust_access_application.mcp.aud
+}

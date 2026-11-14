@@ -44,6 +44,8 @@ token.
   (default: the ChatGPT controller roles). Agent tokens keep per-controller allowlists.
 - The server is stateless (one credential per request), returns JSON responses, and guards
   against DNS rebinding with an allowlist of the published host.
-- Deploy wiring is a follow-up: publishing `/life/mcp` and
-  `/.well-known/oauth-protected-resource/life/mcp`, the Access MCP application, and the env
-  above. Until then this transport is code only, and production behaviour is unchanged.
+- Deployed (#633): the `LifeOS MCP` Access app (`infra/cloudflare`, Managed OAuth) fronts
+  `/life/mcp`, and Caddy routes it to the `lifeos-mcp` service. Discovery is served by Access
+  itself: a `401` points at `/.well-known/cloudflare-access-protected-resource/life/mcp`, which
+  names the team authorization server (RFC 8414, dynamic client registration, PKCE S256).
+  The origin's own RFC 9728 metadata stays for direct (agent-token) use.

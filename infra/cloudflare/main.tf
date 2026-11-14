@@ -54,6 +54,37 @@ resource "cloudflare_zero_trust_access_application" "core" {
   }
 }
 
+# --- Agent ingress: remote MCP for any harness, OAuth by Access (hyperbolic-core #633) ---
+# Path-scoped, so Access OAuth covers only /life/mcp; the rest of core keeps browser SSO only.
+# Access is the OAuth authorization server (Managed OAuth, beta): MCP clients discover it at
+# https://core.kylegsmith.com/.well-known/oauth-authorization-server, the owner signs in once
+# per harness, and the origin verifies the forwarded Access JWT (apps/lifeos/docs/agent-ingress.md).
+resource "cloudflare_zero_trust_access_application" "mcp" {
+  account_id                = var.account_id
+  name                      = "LifeOS MCP"
+  type                      = "self_hosted"
+  domain                    = "${local.core_host}/life/mcp"
+  destinations              = [{ type = "public", uri = "${local.core_host}/life/mcp" }]
+  session_duration          = "24h"
+  app_launcher_visible      = false
+  auto_redirect_to_identity = false
+  policies                  = [{ id = cloudflare_zero_trust_access_policy.owner_only.id, precedence = 1 }]
+  oauth_configuration = {
+    enabled = true
+    dynamic_client_registration = {
+      enabled                = true
+      allow_any_on_localhost = false
+      allow_any_on_loopback  = false
+      # Only the hosted harnesses' callbacks; add one line per new harness.
+      allowed_uris = var.mcp_oauth_redirect_uris
+    }
+    grant = {
+      access_token_lifetime = "15m"
+      session_duration      = "720h"
+    }
+  }
+}
+
 # --- Operator channel: SSH to the host through the tunnel, no inbound ports ---
 
 resource "cloudflare_zero_trust_access_service_token" "ops" {
@@ -110,7 +141,11 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "prod" {
           access = {
             required  = true
             team_name = var.access_team_name
-            aud_tag   = [cloudflare_zero_trust_access_application.core.aud]
+            # The MCP path app has its own AUD; both are valid for this hostname.
+            aud_tag = [
+              cloudflare_zero_trust_access_application.core.aud,
+              cloudflare_zero_trust_access_application.mcp.aud,
+            ]
           }
         }
       },

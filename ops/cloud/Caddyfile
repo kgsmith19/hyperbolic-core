@@ -32,6 +32,12 @@
 		reverse_proxy platform-api:8400
 	}
 
+	# LifeOS remote MCP (#633): the MCP SDK serves /mcp, so keep it and drop /life.
+	handle /life/mcp* {
+		uri strip_prefix /life
+		reverse_proxy lifeos-mcp:8090
+	}
+
 	# LifeOS: strips /life/api itself (LIFEOS_ROOT_PATH).
 	handle /life/api/* {
 		reverse_proxy lifeos:8000
