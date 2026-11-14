@@ -49,3 +49,29 @@ token.
   itself: a `401` points at `/.well-known/cloudflare-access-protected-resource/life/mcp`, which
   names the team authorization server (RFC 8414, dynamic client registration, PKCE S256).
   The origin's own RFC 9728 metadata stays for direct (agent-token) use.
+
+## Bill-payment preparation is not an MCP payment tool (#637)
+
+The backend's `domains.bills.launcher.prepare_payment_handoff(row, provider,
+as_of)` composes the existing two-minute launcher with reviewed public provider
+pages. Supported provider keys are `hagerstown`, `firstenergy`, and `antietam`.
+The result contains a transient human-review plan and a portal source/review date,
+not a payment command or permission. Routes expire 90 days after their recorded
+review; unknown providers and expired routes return no destination. Amounts and
+account identifiers are not copied into the handoff.
+
+Provider selection is caller-supplied, not matched to the bill/payee identity;
+`payee_match` is always `not_verified`. A reviewed public destination is not proof
+that it is the correct payee for this bill.
+
+Authentication is always `not_checked`: this helper does not inspect a provider
+session. `executed` is always false. A link does not establish an account
+connection, verify fees, authorize a transaction, or prove payment. Unknown,
+nonpositive/nonfinite amounts, stale balance evidence, duplicate/excluded/paid
+rows, and rows without an actionable launcher plan return a blocked result.
+Confirm current bill status, amount and fees in the provider-owned portal.
+
+This is a pure, non-networked backend preparation slice, not a deployed UI or
+public MCP endpoint. The existing sensitive-domain exclusions and PAYMENT denial
+remain unchanged. Any owner-facing API/UI wiring needs its own service-boundary
+review; do not expose sensitive bills through generic MCP reads to use this helper.
