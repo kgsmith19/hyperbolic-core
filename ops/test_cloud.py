@@ -40,7 +40,9 @@ class CloudOverlayTest(unittest.TestCase):
     def test_edge_routes_never_reach_internal_services(self):
         caddy = (ROOT / "ops/cloud/Caddyfile").read_text()
         upstreams = set(re.findall(r"reverse_proxy\s+([a-z0-9-]+):\d+", caddy))
-        self.assertEqual(upstreams, {"platform-api", "lifeos", "brain"})
+        # lifeos-mcp (#633) is reached only behind the "LifeOS MCP" Access app and cloudflared's
+        # aud_tag check, and refuses unauthenticated calls itself.
+        self.assertEqual(upstreams, {"platform-api", "lifeos", "lifeos-mcp", "brain"})
         self.assertIn("admin off", caddy)
 
     def test_cloud_init_opens_nothing(self):
